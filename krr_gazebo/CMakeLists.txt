@@ -25,4 +25,6 @@ install(DIRECTORY models
   OPTIONAL
 )
 
+ament_environment_hooks("${CMAKE_CURRENT_SOURCE_DIR}/env_hooks/add_to_gz_model_path.dsv.in")
+
 ament_package()
