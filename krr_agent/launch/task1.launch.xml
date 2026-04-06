@@ -9,10 +9,6 @@
     <arg name="world" value="$(find-pkg-share krr_gazebo)/worlds/$(var world)"/>
   </include>
 
-  <!-- <include file="$(find-pkg-share krr_mirte_skills)/launch/mirte_skills.launch.xml"/> -->
-
-  <!-- <node pkg="krr_agent" exec="krr_agent" name="krr_agent">
-    <param name="task" value="$(var task)" />
-    <param name="task_delay" value="$(var task_delay)" />
-  </node> -->
+  <include file="$(find-pkg-share krr_agent)/launch/task1.launch.py"/>
+  
 </launch>

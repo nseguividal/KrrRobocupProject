@@ -40,6 +40,13 @@ def generate_launch_description():
         ])
     )
 
+    # --- TYPEDB SERVER ---
+    typedb_server = ExecuteProcess(
+        cmd=['typedb', 'server', '--storage.data', os.path.expanduser('~/Desktop/KRR_ws/src/krr_agent/typedb_data')],
+        output='screen',
+        name='typedb_server'
+    )
+
     # --- STEP 1: Init DB (loads schema + static data) ---
     init_typedb_process = ExecuteProcess(
         cmd=['python3', setup_db_script],
@@ -81,6 +88,14 @@ def generate_launch_description():
 
     # --- EVENT CHAIN ---
 
+    on_server_start = RegisterEventHandler(
+        OnProcessStart(
+            target_action=typedb_server,
+            on_start=[
+                TimerAction(period=8.0, actions=[init_typedb_process])  # wait for server to bind :1729
+            ]
+        )
+    )
     # 1. DB script finishes → start ros_typedb node
     on_db_ready = RegisterEventHandler(
         OnProcessExit(
@@ -157,7 +172,8 @@ def generate_launch_description():
         initial_pose_node,
         plansys2_bringup,
         mirte_skills_launch,
-        init_typedb_process,
+        typedb_server,
+        on_server_start,
         on_db_ready,
         on_typedb_start,
         on_configured,
