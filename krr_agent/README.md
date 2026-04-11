@@ -6,9 +6,8 @@ Solution to the KRR final project — RoboCup@Home-inspired Tasks
 - [Container Images](#container-images)
 - [Workspace Setup](#workspace-setup)
 - [Running the Tasks](#running-the-tasks)
-- [krr\_agent](#krr_agent-1)
+- [krr_agent package](#krr_agent-1)
 - [Repository Structure](#repository-structure)
-- [Planner Selection](#planner-selection)
 - [References](#references)
 
 ---
@@ -39,21 +38,11 @@ colcon build
 
 ## Running the Tasks
 
-Every task requires **two terminals**, both inside the Singularity container.
+Every task requires **only one terminal**, inside the Singularity container.
 
-### Terminal 1 — Singularity + TypeDB server
 
 ```bash
 # Replace <PATH> with the path to your .sif image and <vX> with the version (e.g., v3)
-singularity shell -B $XAUTHORITY:$XAUTHORITY -p <PATH>/ro47014_humble_<vX>.sif
-
-# Start the TypeDB server — keep this terminal open
-typedb server --storage.data=$PWD/typedb_data
-```
-
-### Terminal 2 — ROS 2 launch
-
-```bash
 singularity shell -B $XAUTHORITY:$XAUTHORITY -p <PATH>/ro47014_humble_<vX>.sif
 
 # Source the course base underlay
@@ -81,7 +70,7 @@ ros2 launch krr_agent task2.launch.xml
 #### Task 2 — Semantic Tidy Up · Single PDDL
 Full apartment-level world model built before planning. Use when drop location positions cannot be assumed known a priori.
 ```bash
-ros2 launch krr_agent task2.launch.xml manager_script:=task2_manager.py USE_MULTI_PDDL:=false
+ros2 launch krr_agent task2.launch.xml manager_script:=task2_manager.py
 ```
 
 #### Task 3 — Find and Bring
@@ -92,7 +81,7 @@ ros2 launch krr_agent task3.launch.xml
 
 ---
 
-## `krr_agent`
+## `krr_agent package`
 
 ### Subscribed Topics
 
@@ -145,7 +134,6 @@ ros2 launch krr_agent task3.launch.xml
 ```
 krr_agent/
 ├── config/
-│   ├── params.yaml
 │   └── plansys2_params.yaml
 ├── include/krr_agent/
 │   ├── action_move_to_drop_location_t1.hpp
@@ -172,10 +160,8 @@ krr_agent/
 │   ├── problem_dummy_t3.pddl
 │   ├── problem_exploration_template.pddl
 │   ├── problem_t1_template.pddl
-│   ├── problem_t2.pddl
 │   ├── problem_t2_template.pddl
 │   ├── problem_t3_template.pddl
-│   └── problem_t3.pddl
 ├── scripts/
 │   ├── data.tql
 │   ├── schema.tql
@@ -200,12 +186,6 @@ krr_agent/
 ├── package.xml
 └── README.md
 ```
-
----
-
-## Planner Selection
-
-The default planner is **POPF**. As an alternative, **OPTIC** can be used too. Both plugins are configured in `config/plansys2_params.yaml`.
 
 ---
 
