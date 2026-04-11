@@ -56,13 +56,6 @@ def generate_launch_description():
         ])
     )
 
-    # --- TYPEDB SERVER ---
-    typedb_server = ExecuteProcess(
-        cmd=['typedb', 'server', '--storage.data', os.path.expanduser('~/Desktop/KRR_ws/src/krr_agent/typedb_data')],
-        output='screen',
-        name='typedb_server'
-    )
-
     # --- DELAYED PLANSYS2 BRINGUP ---
     # Give Gazebo and Nav2 12 seconds to settle down before hitting the CPU with PlanSys2
     delayed_plansys2 = TimerAction(
@@ -112,15 +105,6 @@ def generate_launch_description():
     )
 
     # --- EVENT CHAIN ---
-
-    on_server_start = RegisterEventHandler(
-        OnProcessStart(
-            target_action=typedb_server,
-            on_start=[
-                TimerAction(period=8.0, actions=[init_typedb_process])  # wait for server to bind :1729
-            ]
-        )
-    )
 
     # 1. DB script finishes → start ros_typedb node
     on_db_ready = RegisterEventHandler(
@@ -200,9 +184,8 @@ def generate_launch_description():
     return LaunchDescription([
         initial_pose_node,
         mirte_skills_launch,
-        typedb_server,
-        delayed_plansys2, # <-- TimerAction substituted here
-        on_server_start,
+        delayed_plansys2, 
+        init_typedb_process,
         on_db_ready,
         on_typedb_start,
         on_configured,

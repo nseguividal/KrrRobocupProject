@@ -38,9 +38,26 @@ colcon build
 
 ## Running the Tasks
 
-Every task requires **only one terminal**, inside the Singularity container.
+All tasks implementations require **two terminals**, inside the Singularity container.
 
+Firstly, a terminal to lauch the typeDB server is needed.
 
+```bash
+# Replace <PATH> with the path to your .sif image and <vX> with the version (e.g., v3)
+singularity shell -B $XAUTHORITY:$XAUTHORITY -p <PATH>/ro47014_humble_<vX>.sif
+
+# Source the course base underlay
+source /krr/krr_base_ws/install/setup.bash
+
+# Source your workspace overlay (replace <your_ws> with your workspace name, e.g. krr_ws)
+source ~/<your_ws>/install/setup.bash
+
+# Launch the TypeDB server
+typedb server --storage.data ~/<your_ws>/src/krr_agent/typedb_data
+
+```
+
+And a second terminal to launch the implementation (*always launch this first*).
 ```bash
 # Replace <PATH> with the path to your .sif image and <vX> with the version (e.g., v3)
 singularity shell -B $XAUTHORITY:$XAUTHORITY -p <PATH>/ro47014_humble_<vX>.sif
@@ -53,7 +70,10 @@ source ~/<your_ws>/install/setup.bash
 
 # Launch the desired task
 ros2 launch krr_agent task<Y>.launch.xml   # Y = 1, 2, or 3
+
 ```
+
+
 
 #### Task 1 — Simple Tidy Up
 Places each object in the nearest drop location (Euclidean distance) within the same room.
