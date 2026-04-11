@@ -1,18 +1,23 @@
 import os
+
 from ament_index_python.packages import get_package_share_directory
+
 from launch import LaunchDescription
 from launch.actions import (
-    IncludeLaunchDescription, ExecuteProcess, OpaqueFunction,
-    RegisterEventHandler, TimerAction, DeclareLaunchArgument)
+    IncludeLaunchDescription, ExecuteProcess,
+    RegisterEventHandler, TimerAction)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.event_handlers import OnProcessStart, OnProcessExit
 from launch_ros.actions import Node
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
-from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
+from launch.substitutions import PathJoinSubstitution, PythonExpression
 
 
 def generate_launch_description():
+    
+    is_multi_pddl_str = PythonExpression(["'true'"])
+
     krr_project_path = get_package_share_directory('krr_agent')
     plansys_path = get_package_share_directory('plansys2_bringup')
 
@@ -25,7 +30,6 @@ def generate_launch_description():
             plansys_path, 'launch', 'plansys2_bringup_launch_distributed.py')),
         launch_arguments={
             'model_file':   krr_project_path + '/pddl/domain_t1.pddl',
-            # 'problem_file': krr_project_path + '/pddl/problem_t1_template.pddl',
             'problem_file': krr_project_path + '/pddl/problem_dummy.pddl',
             'params_file':  plansys2_params_file,
         }.items()
@@ -40,6 +44,7 @@ def generate_launch_description():
         ])
     )
 
+    
     # --- TYPEDB SERVER ---
     typedb_server = ExecuteProcess(
         cmd=['typedb', 'server', '--storage.data', os.path.expanduser('~/Desktop/KRR_ws/src/krr_agent/typedb_data')],
@@ -57,6 +62,7 @@ def generate_launch_description():
     # --- STEP 1: Init DB (loads schema + static data) ---
     init_typedb_process = ExecuteProcess(
         cmd=['python3', setup_db_script],
+        additional_env={'USE_MULTI_PDDL': is_multi_pddl_str},
         output='screen'
     )
 
@@ -71,6 +77,7 @@ def generate_launch_description():
             'address': 'localhost:1729',
             'force_database': False,
             'force_data': False,
+            'infer': True,
         }]
     )
 
@@ -103,6 +110,7 @@ def generate_launch_description():
             ]
         )
     )
+
     # 1. DB script finishes → start ros_typedb node
     on_db_ready = RegisterEventHandler(
         OnProcessExit(
@@ -129,15 +137,15 @@ def generate_launch_description():
         )
     )
 
-    # 4. activate exits → start all nodes that need TypeDB ready (Wait 10 seconds for PlanSys2)
+    # 4. activate exits → start all nodes that need TypeDB ready
     on_activated = RegisterEventHandler(
         OnProcessExit(
             target_action=activate_typedb,
             on_exit=[
-                TimerAction(period=10.0, actions=[
+            TimerAction(period=10.0, actions=[ 
                     Node(
                         package='krr_agent',
-                        executable='task1_multiple_pddl_manager.py',
+                        executable='task1_manager.py',
                         name='task_manager_node',
                         output='screen'
                     ),
@@ -155,23 +163,26 @@ def generate_launch_description():
                     Node(
                         package='krr_agent',
                         executable='action_move_to_drop_location_t1',
+                        output='screen',
                         parameters=[{'action_name': 'move_to_drop_location'}]
                     ),
                     Node(
                         package='krr_agent',
                         executable='action_pick',
+                        name='action_pick_node',
                         parameters=[{'action_name': 'pick'}]
                     ),
                     Node(
                         package='krr_agent',
                         executable='action_place',
+                        name='action_place_node',
                         parameters=[{'action_name': 'place'}]
                     ),
                     Node(
                         package='krr_agent',
                         executable='action_next_room',
                         parameters=[{'action_name': 'next_room'}]
-                    ),
+                    ),    
                 ])
             ]
         )
@@ -181,7 +192,7 @@ def generate_launch_description():
         initial_pose_node,
         mirte_skills_launch,
         typedb_server,
-        delayed_plansys2, 
+        delayed_plansys2,
         on_server_start,
         on_db_ready,
         on_typedb_start,

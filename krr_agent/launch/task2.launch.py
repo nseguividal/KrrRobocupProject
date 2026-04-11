@@ -12,9 +12,24 @@ from launch_ros.actions import Node
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PythonExpression
 
 
 def generate_launch_description():
+
+    manager_script = LaunchConfiguration('manager_script')
+
+    manager_script_arg = DeclareLaunchArgument(
+        'manager_script',
+        default_value='task2_multiple_pddl_manager.py',
+        description='Which manager script to use: task2_multiple_pddl_manager.py or task2_manager.py'
+    )
+
+    is_multi_pddl_str = PythonExpression([
+        "'true' if 'multiple' in '", manager_script, "' else 'false'"
+    ])
+
     krr_project_path = get_package_share_directory('krr_agent')
     plansys_path = get_package_share_directory('plansys2_bringup')
 
@@ -58,6 +73,7 @@ def generate_launch_description():
     # --- STEP 1: Init DB (loads schema + static data) ---
     init_typedb_process = ExecuteProcess(
         cmd=['python3', setup_db_script],
+        additional_env={'USE_MULTI_PDDL': is_multi_pddl_str},
         output='screen'
     )
 
@@ -140,7 +156,7 @@ def generate_launch_description():
                 TimerAction(period=10.0, actions=[
                     Node(
                         package='krr_agent',
-                        executable='task2_multiple_pddl_manager.py',
+                        executable=manager_script,
                         name='task_manager_node',
                         output='screen'
                     ),

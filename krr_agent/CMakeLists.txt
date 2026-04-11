@@ -167,7 +167,6 @@ ament_target_dependencies(set_initial_pose rclcpp geometry_msgs)
 
 install(PROGRAMS
   scripts/task1_manager.py
-  scripts/task1_multiple_pddl_manager.py
   scripts/task2_manager.py
   scripts/task2_multiple_pddl_manager.py
   scripts/task3_manager.py

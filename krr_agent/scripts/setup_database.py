@@ -18,7 +18,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # True  -> Multiple PDDL -> keep predefined drop locations from data.tql + Task 3
 # False -> Single   PDDL -> remove the marked drop-location block from data.tql before loading
-MULTI_PDDL_FILE = True
+MULTI_PDDL_FILE = os.getenv("USE_MULTI_PDDL", "true").lower() == "true"
 
 DROP_START_MARKER = "# --------- DROP LOCATIONS START — OVERWRITE ONLY IF SINGLE DPPL ---------"
 DROP_END_MARKER = "# --------- DROP LOCATIONS END — OVERWRITE ONLY IF SINGLE DPPL ---------"

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import time
 import threading
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
@@ -9,15 +8,14 @@ from ament_index_python.packages import get_package_share_directory
 from typedb.driver import SessionType, TransactionType
 
 # Import your base class and shared utilities
-from task_manager_base import TaskManagerBase, ScannedObject, euclidean_distance, make_pose_stamped
+# Ensure task_manager_base.py is in your PYTHONPATH or the same directory
+from task_manager_base import TaskManagerBase, euclidean_distance, make_pose_stamped, ScannedObject
 
 # ---------------------------------------------------------------------------
 # CONFIGURATION & PATHS
 # ---------------------------------------------------------------------------
-START_ROOM = 'kitchen'
-START_LOCATION = 'scan_kitchen'  # robot starts at kitchen scan location
-ROOM_ADJACENCY = []
 
+START_ROOM = 'kitchen'
 pkg_share_dir = get_package_share_directory('krr_agent')
 PROBLEM_TEMPLATE_PATH = os.path.join(pkg_share_dir, 'pddl', 'problem_t1_template.pddl')
 PROBLEM_FILE_PATH = '/tmp/problem_t1_generated.pddl'
@@ -27,147 +25,61 @@ PROBLEM_FILE_PATH = '/tmp/problem_t1_generated.pddl'
 # ---------------------------------------------------------------------------
 
 def build_pddl_problem(
-        scanned_objects: list,
-        all_drop_locations: dict,
-        object_to_closest_drop: dict,
-        rooms: list,
-        scan_locations: dict,
-        drop_to_room: dict,
-        start_room: str) -> str:
-
-    global ROOM_ADJACENCY
-
-    # -----------------------
-    # DECLARATIONS
-    # -----------------------
-
-    ## --- Item declarations ---
-    item_lines = '\n'.join(
-        f'    {o.entity_id} - item' for o in scanned_objects)
-
+        scanned_objects, all_drop_locations, object_to_closest_drop, 
+        rooms, scan_locations, drop_to_room, start_room, next_room_scan_loc):
+    """
+    Constructs a PDDL problem for a specific room tidying phase.
+    """
+    # Item and Location declarations
+    item_lines = '\n'.join(f'    {o.entity_id} - item' for o in scanned_objects)
     
-    ## --- Location declarations ---
-    location_parts = []
+    loc_parts = [f'    {scan_locations[r]} - location' for r in rooms if r in scan_locations]
+    loc_parts += [f'    loc_{o.entity_id} - location' for o in scanned_objects]
+    loc_parts += [f'    {d_id} - location' for d_id in all_drop_locations.keys()]
+    location_lines = '\n'.join(loc_parts)
 
-    # Scan locations
-    for scan_loc in scan_locations.values():
-        location_parts.append(f'    {scan_loc} - location')
-
-    # Object locations
-    for o in scanned_objects:
-        location_parts.append(f'    loc_{o.entity_id} - location')
-
-    # Drop locations
-    for drop_id in all_drop_locations.keys():
-        location_parts.append(f'    {drop_id} - location')
-    location_lines = '\n'.join(location_parts)
-
-    
-    
-    ## --- Room declarations ---
     room_lines = '\n'.join(f'    {r} - room' for r in rooms)
 
-    # Tidying predicate (start_room only at start)
-    tidying_lines = f'    (tidying {start_room})'
-
-    # Untidy for rooms with items 
-    # Find all rooms that contain at least one scanned object
-    rooms_with_items = {o.room for o in scanned_objects}
+    # Predicates
+    loc_in_room_parts = [f'    (location_in_room {scan_locations[r]} {r})' for r in rooms if r in scan_locations]
+    loc_in_room_parts += [f'    (location_in_room loc_{o.entity_id} {o.room})' for o in scanned_objects]
+    loc_in_room_parts += [f'    (location_in_room {d_id} {drop_to_room.get(d_id, start_room)})' 
+                          for d_id in all_drop_locations.keys()]
     
-    # Empty rooms are those not in our items set
-    empty_rooms = set(rooms) - rooms_with_items
+    # Simple Adjacency for the phase
+    next_room = [r for r in rooms if r != start_room][0]
+    adjacency_lines = f'    (adjacent {start_room} {next_room})\n    (adjacent {next_room} {start_room})'
 
-    untidy_lines = '\n'.join(
-        f'    (untidy {r})' for r in rooms_with_items)
-    
-    # Tidy for empty rooms except start_room (which is tidying)
-    tidy_lines = '\n'.join(
-        f'    (tidy {r})' for r in empty_rooms if r != start_room)
+    # Goals
+    goal_lines = '\n'.join(f'    (on_drop_loc {o.entity_id} {object_to_closest_drop[o.entity_id]})' for o in scanned_objects)
+    tidy_goal_lines = f'    (tidy {start_room})\n    (agent_at {next_room_scan_loc})'
 
-
-    # -----------------------
-    # PREDICATES
-    # -----------------------
-
-    ## --- Location predicates ---
-
-    # Scan loc predicates
-    scan_loc_lines = '\n'.join(f'    (scan_loc {loc})' for loc in scan_locations.values())
-
-    # Location in room predicates
-    loc_in_room_parts = []
-    
-    for room, scan_loc in scan_locations.items(): # Scan locations
-        loc_in_room_parts.append(f'    (location_in_room {scan_loc} {room})')
-        
-    for o in scanned_objects: # Object locations
-        loc_in_room_parts.append(f'    (location_in_room loc_{o.entity_id} {o.room})')
-        
-    for drop_id in all_drop_locations.keys(): # Drop locations
-        drop_room = drop_to_room.get(drop_id, start_room)
-        loc_in_room_parts.append(f'    (location_in_room {drop_id} {drop_room})')
-    loc_in_room_lines = '\n'.join(loc_in_room_parts)
-
-    # Drop loc predicates
-    drop_loc_lines = '\n'.join(
-        f'    (drop_loc {drop_id})' for drop_id in all_drop_locations.keys())
-
-    adj_pairs = set(ROOM_ADJACENCY)
-    adj_pairs.update((r2, r1) for (r1, r2) in ROOM_ADJACENCY)
-    adjacency_lines = '\n'.join(
-        f'    (adjacent {r1} {r2})' for (r1, r2) in sorted(adj_pairs))
-
-    # Item location predicates
-    item_at_lines = '\n'.join(
-        f'    (item_at {o.entity_id} loc_{o.entity_id})'
-        for o in scanned_objects)
-
-    # ---- Goals predicates ---
-
-    # on_drop_loc goals 
-    goal_lines = '\n'.join(
-        f'    (on_drop_loc {o.entity_id} {object_to_closest_drop[o.entity_id]})'
-        for o in scanned_objects)
-
-    # tidy goals for all rooms
-    tidy_goal_lines = '\n'.join(
-        f'    (tidy {r})' for r in rooms)
-
-
-    # -----------------------
-    # FILL IN THE TEMPLATE
-    # -----------------------
     with open(PROBLEM_TEMPLATE_PATH, 'r') as f:
         content = f.read()
 
-    content = content.replace('START_LOCATION', START_LOCATION)
-    content = content.replace('    ; PLACEHOLDER: item declarations',        item_lines)
-    content = content.replace('    ; PLACEHOLDER: location declarations',    location_lines)
-    content = content.replace('    ; PLACEHOLDER: room declarations',        room_lines)
-    content = content.replace('    ; PLACEHOLDER: tidying predicates',       tidying_lines)
-    content = content.replace('    ; PLACEHOLDER: untidy predicates',        untidy_lines)
-    content = content.replace('    ; PLACEHOLDER: tidy predicates',          tidy_lines)
-    content = content.replace('    ; PLACEHOLDER: scan_loc predicates',      scan_loc_lines)
-    content = content.replace('    ; PLACEHOLDER: location_in_room predicates', loc_in_room_lines)
-    content = content.replace('    ; PLACEHOLDER: drop_loc predicates',      drop_loc_lines)
-    content = content.replace('    ; PLACEHOLDER: adjacent predicates',      adjacency_lines)
-    content = content.replace('    ; PLACEHOLDER: item_at predicates',       item_at_lines)
-    content = content.replace('    ; PLACEHOLDER: on_drop_loc goals',        goal_lines)
-    content = content.replace('    ; PLACEHOLDER: tidy goals',          tidy_goal_lines)
+    replacements = {
+        'START_LOCATION': scan_locations[start_room],
+        '; PLACEHOLDER: item declarations': item_lines,
+        '; PLACEHOLDER: location declarations': location_lines,
+        '; PLACEHOLDER: room declarations': room_lines,
+        '; PLACEHOLDER: tidying predicates': f'    (tidying {start_room})',
+        '; PLACEHOLDER: untidy predicates': '\n'.join(f'    (untidy {r})' for r in rooms),
+        '; PLACEHOLDER: scan_loc predicates': '\n'.join(f'    (scan_loc {scan_locations[r]})' for r in rooms if r in scan_locations),
+        '; PLACEHOLDER: location_in_room predicates': '\n'.join(loc_in_room_parts),
+        '; PLACEHOLDER: drop_loc predicates': '\n'.join(f'    (drop_loc {d})' for d in all_drop_locations.keys()),
+        '; PLACEHOLDER: adjacent predicates': adjacency_lines,
+        '; PLACEHOLDER: item_at predicates': '\n'.join(f'    (item_at {o.entity_id} loc_{o.entity_id})' for o in scanned_objects),
+        '; PLACEHOLDER: on_drop_loc goals': goal_lines,
+        '; PLACEHOLDER: tidy goals': tidy_goal_lines
+    }
 
-    # --- Write to disk ---
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(PROBLEM_FILE_PATH)),
-                    exist_ok=True)
-        with open(PROBLEM_FILE_PATH, 'w') as f:
-            f.write(content)
-        print(f'[INFO] problem.pddl written with {len(scanned_objects)} object(s).')
-    except OSError as e:
-        print(f'[WARN] Could not write problem.pddl: {e}')
+    for k, v in replacements.items():
+        content = content.replace(k, v)
 
+    with open(PROBLEM_FILE_PATH, 'w') as f:
+        f.write(content)
+    
     return content
-
-
 
 # ---------------------------------------------------------------------------
 # MAIN NODE
@@ -176,86 +88,33 @@ def build_pddl_problem(
 class TaskManagerNode(TaskManagerBase):
 
     def __init__(self):
-        # Configure the base class - Note: clear_problem_knowledge=False for T1
         super().__init__(
             node_name='task_manager_node',
             enable_nav=True,
-            enable_drop_locations=True,
-            clear_problem_knowledge=False,
-            wait_for_task_status=False,
+            enable_drop_locations=False, # We load them via TypeDB in this task
+            clear_problem_knowledge=True,
+            wait_for_task_status=True,
         )
         self.get_logger().info('Task 1 Manager (Optimized) started.')
         self._task_started = False
-
-        # Independent thread for the state machine logic
         self.task_thread = threading.Thread(target=self._start_task)
         self.task_thread.start()
 
     def _load_knowledge_from_db(self):
-        """Loads static mappings from TypeDB to replace hardcoded Python dictionaries."""
-        global ROOM_ADJACENCY
-        self.room_waypoints = {}
-        self.scan_locations = {}
-        self.drop_to_room = {}
-        self.room_adjacency = []
-
-        self.get_logger().info("Loading environment knowledge from TypeDB...")
+        """Loads rooms and scan locations from TypeDB."""
+        self.room_waypoints, self.scan_locations, self.drop_to_room = {}, {}, {}
 
         with self.db_driver.session(self.database_name, SessionType.DATA) as session:
             with session.transaction(TransactionType.READ) as tx:
-                
-                # 1. Fetch adjacency predicates
-                query_adjacency = """
-                    match
-                        $r1 isa room, has room-name $name1;
-                        $r2 isa room, has room-name $name2;
-                        (room-a: $r1, room-b: $r2) isa adjacent;
-                    get $name1, $name2;
-                """
-                for answer in tx.query.get(query_adjacency):
-                    room1 = answer.get("name1").as_attribute().get_value()
-                    room2 = answer.get("name2").as_attribute().get_value()
-                    self.room_adjacency.append((room1, room2))
+                # Load Drops
+                for answer in tx.query.get("match $rm isa room, has room-name $rn; $d isa drop-location, has id $di; (container: $rm, contained-pose: $p) isa spatial-containment; (located-target: $d, location: $p) isa physical-location; get $rn, $di;"):
+                    self.drop_to_room[answer.get("di").as_attribute().get_value()] = answer.get("rn").as_attribute().get_value()
 
-                # 2. Fetch Drop Locations and their containing rooms
-                query_drops = """
-                    match
-                        $rm isa room, has room-name $r_name;
-                        $d isa drop-location, has id $d_id;
-                        $p isa pose;
-                        (located-target: $d, location: $p) isa physical-location;
-                        (container: $rm, contained-pose: $p) isa spatial-containment;
-                    get $r_name, $d_id;
-                """
-                for answer in tx.query.get(query_drops):
-                    room = answer.get("r_name").as_attribute().get_value()
-                    drop_id = answer.get("d_id").as_attribute().get_value()
-                    self.drop_to_room[drop_id] = room
-
-                # 3. Fetch Scan Waypoints
-                query_scans = """
-                    match
-                        $rm isa room, has room-name $r_name;
-                        $scan isa scan-location;
-                        $p isa pose, has pos-x $x, has pos-y $y;
-                        (located-target: $scan, location: $p) isa physical-location;
-                        (container: $rm, contained-pose: $p) isa spatial-containment;
-                    get $r_name, $x, $y;
-                """
-                for answer in tx.query.get(query_scans):
-                    room = answer.get("r_name").as_attribute().get_value()
-                    x = answer.get("x").as_attribute().get_value()
-                    y = answer.get("y").as_attribute().get_value()
-                    
-                    self.room_waypoints[room] = (x, y, 0.0) 
-                    self.scan_locations[room] = f"scan_{room}" # PDDL Symbol mapping
-
-        ROOM_ADJACENCY = list(self.room_adjacency)
-        self.get_logger().info(
-            f"Loaded {len(self.room_waypoints)} scan locations, "
-            f"{len(self.room_adjacency)} adjacency relations, and "
-            f"{len(self.drop_to_room)} drop locations.")
-
+                # Load Scan Locations
+                for answer in tx.query.get("match $rm isa room, has room-name $rn; $scan isa scan-location; $p isa pose, has pos-x $x, has pos-y $y; (container: $rm, contained-pose: $p) isa spatial-containment; (located-target: $scan, location: $p) isa physical-location; get $rn, $x, $y;"):
+                    r = answer.get("rn").as_attribute().get_value()
+                    self.room_waypoints[r] = (answer.get("x").as_attribute().get_value(), answer.get("y").as_attribute().get_value(), 0.0)
+                    self.scan_locations[r] = f"scan_{r}"
 
     def _start_task(self):
         if self._task_started: return
@@ -263,124 +122,54 @@ class TaskManagerNode(TaskManagerBase):
         self.run_task()
 
     def run_task(self):
-        all_scanned_objects = []
-        all_drop_locations = {}
-        object_to_closest_drop = {}
-
-        # --- Scan ALL rooms before building the problem ---
-        
-        unvisited_rooms = list(self.room_waypoints.keys())
+        """Greedy scanning and tidy-up execution loop."""
+        unvisited = list(self.room_waypoints.keys())
         ordered_rooms = []
-
-        # 1. Start at the designated START_ROOM (Kitchen)
-        if START_ROOM in unvisited_rooms:
+        current_loc = self.room_waypoints.get(START_ROOM, (0.0, 0.0, 0.0))
+        
+        if START_ROOM in unvisited:
             ordered_rooms.append(START_ROOM)
-            unvisited_rooms.remove(START_ROOM)
-            current_loc = self.room_waypoints[START_ROOM]
-        else:
-            current_loc = (0.0, 0.0, 0.0) # Fallback origin
+            unvisited.remove(START_ROOM)
 
-        # 2. Greedy search for the closest next room
-        while unvisited_rooms:
-            next_room = min(
-                unvisited_rooms, 
-                key=lambda r: euclidean_distance(
-                    current_loc[0], current_loc[1], 
-                    self.room_waypoints[r][0], self.room_waypoints[r][1]
-                )
-            )
+        while unvisited:
+            next_room = min(unvisited, key=lambda r: euclidean_distance(current_loc[0], current_loc[1], self.room_waypoints[r][0], self.room_waypoints[r][1]))
             ordered_rooms.append(next_room)
-            unvisited_rooms.remove(next_room)
-            # Update current location to the room we just picked
+            unvisited.remove(next_room)
             current_loc = self.room_waypoints[next_room]
 
-        self.get_logger().info(f'Optimized scanning sequence: {" -> ".join(ordered_rooms)}')
+        for i, room_name in enumerate(ordered_rooms):
+            # Navigate using parent method
+            self._send_nav_goal_and_wait(make_pose_stamped(*self.room_waypoints[room_name]))
 
-        for room_name in ordered_rooms:
-            wx, wy, wyaw = self.room_waypoints[room_name]
-            
-            self.get_logger().info(f'Navigating to {room_name}...')
-            self._send_nav_goal_and_wait(make_pose_stamped(wx, wy, wyaw))
-
-            # Discover obj via perception, then insert to TypeDB
-            self.get_logger().info(f'Scanning {room_name}...')
+            # Scan and get closest drops
             object_poses = self._get_objects_in_room()
-
-            perceived_drops = self._get_drop_locations_in_room()
-            for drop in perceived_drops:
-                drop_type = drop.type.data.strip()   # e.g. "dishwasher", "tableware", ...
-                drop_pose = drop.drop_pose
-                # Better to preserve semantic IDs instead of inventing generic drop_0_room ids
-                drop_id = self._make_drop_id(drop_type)
-
-                # Insert drop location
-                self.insert_drop_location(drop_id, room_name, drop_pose.position.x, drop_pose.position.y)
-                self.drop_to_room[drop_id] = room_name
-
-                self.get_logger().info(
-                    f'  Found {drop_id} at ({drop_pose.position.x:.2f}, 'f'{drop_pose.position.y:.2f})')
-
             room_drops = self.get_drop_locations_in_room(room_name)
-            all_drop_locations.update(room_drops)
-
-            self.get_logger().info(
-                f'Found {len(object_poses)} object(s) and '
-                f'{len(room_drops)} drop location(s) in {room_name}.')
             
-            for i, pose in enumerate(object_poses):
-                obj_id = f'obj_{i}_{room_name}'
-                obj = ScannedObject(obj_id, pose, room_name)
-                all_scanned_objects.append(obj)
+            all_scanned_objects, object_to_closest_drop = [], {}
 
+            for idx, pose in enumerate(object_poses):
+                obj_id = f'obj_{idx}_{room_name}'
                 self.insert_scanned_object(obj_id, room_name, pose.position.x, pose.position.y)
-                self.get_logger().info(
-                    f'  Found {obj_id} at ({pose.position.x:.2f}, 'f'{pose.position.y:.2f}). Target: [UNKNOWN PENDING PERCEPTION]')
-                
-                # Find closest drop in THIS room
-                closest_drop_id = None
-                min_dist = float('inf')
-                for drop_id, (dx, dy) in room_drops.items():
-                    dist = euclidean_distance(
-                        pose.position.x, pose.position.y, dx, dy)
-                    if dist < min_dist:
-                        min_dist = dist
-                        closest_drop_id = drop_id
+                all_scanned_objects.append(ScannedObject(obj_id, pose, room_name))
 
-                object_to_closest_drop[obj_id] = closest_drop_id
-                self.get_logger().info(
-                    f'  {obj_id} at ({pose.position.x:.2f}, '
-                    f'{pose.position.y:.2f}) -> {closest_drop_id}')
+                closest_drop = min(room_drops.keys(), key=lambda d: euclidean_distance(pose.position.x, pose.position.y, room_drops[d][0], room_drops[d][1]))
+                object_to_closest_drop[obj_id] = closest_drop
 
-        # --- Return to start room scan position before handing off ---
-        self.get_logger().info('All rooms scanned. Returning to start room...')
-        wx, wy, wyaw = self.room_waypoints.get('kitchen', (0.0, 0.0, 0.0))
-        self._send_nav_goal_and_wait(make_pose_stamped(wx, wy, wyaw))
+            if not all_scanned_objects:
+                continue
 
-        if not all_scanned_objects:
-            self.get_logger().info('No objects found anywhere. Nothing to tidy.')
-            return
+            # Planning Phase
+            next_idx = i + 1 if i + 1 < len(ordered_rooms) else 0
+            next_scan_loc = self.scan_locations[ordered_rooms[next_idx]]
 
-        self.get_logger().info(
-            f'Building PDDL problem with {len(all_scanned_objects)} '
-            f'total object(s)...')
-        
-        # Pass dynamic parameters to PDDL builder
-        problem_str = build_pddl_problem(
-            all_scanned_objects, 
-            all_drop_locations, 
-            object_to_closest_drop,
-            list(self.room_waypoints.keys()),
-            self.scan_locations,
-            self.drop_to_room,
-            START_ROOM)
-        
-        self._load_problem_and_trigger_cpp(problem_str)
-        self.get_logger().info('Task handed off to executor.')
+            problem_str = build_pddl_problem(all_scanned_objects, room_drops, object_to_closest_drop, 
+                                             [room_name, ordered_rooms[next_idx]], self.scan_locations, 
+                                             self.drop_to_room, room_name, next_scan_loc)
+            
+            # Execute PDDL using parent method
+            self._execute_phase_pddl(problem_str)
 
-
-# ---------------------------------------------------------------------------
-# ENTRY POINT
-# ---------------------------------------------------------------------------
+        self.get_logger().info('Task 1 Complete.')
 
 def main(args=None):
     rclpy.init(args=args)
