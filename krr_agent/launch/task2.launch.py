@@ -48,6 +48,13 @@ def generate_launch_description():
         name='typedb_server'
     )
 
+    # --- DELAYED PLANSYS2 BRINGUP ---
+    # Give Gazebo and Nav2 12 seconds to settle down before hitting the CPU with PlanSys2
+    delayed_plansys2 = TimerAction(
+        period=12.0, 
+        actions=[plansys2_bringup]
+    )
+
     # --- STEP 1: Init DB (loads schema + static data) ---
     init_typedb_process = ExecuteProcess(
         cmd=['python3', setup_db_script],
@@ -125,58 +132,60 @@ def generate_launch_description():
         )
     )
 
-    # 4. activate exits → start all nodes that need TypeDB ready
+    # 4. activate exits → start all nodes that need TypeDB ready (Wait 10 seconds for PlanSys2)
     on_activated = RegisterEventHandler(
         OnProcessExit(
             target_action=activate_typedb,
             on_exit=[
-                Node(
-                    package='krr_agent',
-                    executable='task2_multiple_pddl_manager.py',
-                    name='task_manager_node',
-                    output='screen'
-                ),
-                Node(
-                    package='krr_agent',
-                    executable='task_controller',
-                    output='screen',
-                    parameters=[plansys2_params_file]
-                ),
-                Node(
-                    package='krr_agent',
-                    executable='action_move_to_object',
-                    parameters=[{'action_name': 'move_to_object'}]
-                ),
-                Node(
-                    package='krr_agent',
-                    executable='action_move_to_drop_location_t2',
-                    output='screen',
-                    parameters=[{'action_name': 'move_to_drop_location'}]
-                ),
-                Node(
-                    package='krr_agent',
-                    executable='action_pick',
-                    parameters=[{'action_name': 'pick'}]
-                ),
-                Node(
-                    package='krr_agent',
-                    executable='action_place',
-                    parameters=[{'action_name': 'place'}]
-                ),
-                Node(
-                    package='krr_agent',
-                    executable='action_next_room',
-                    parameters=[{'action_name': 'next_room'}]
-                ),
+                TimerAction(period=10.0, actions=[
+                    Node(
+                        package='krr_agent',
+                        executable='task2_multiple_pddl_manager.py',
+                        name='task_manager_node',
+                        output='screen'
+                    ),
+                    Node(
+                        package='krr_agent',
+                        executable='task_controller',
+                        output='screen',
+                        parameters=[plansys2_params_file]
+                    ),
+                    Node(
+                        package='krr_agent',
+                        executable='action_move_to_object',
+                        parameters=[{'action_name': 'move_to_object'}]
+                    ),
+                    Node(
+                        package='krr_agent',
+                        executable='action_move_to_drop_location_t2',
+                        output='screen',
+                        parameters=[{'action_name': 'move_to_drop_location'}]
+                    ),
+                    Node(
+                        package='krr_agent',
+                        executable='action_pick',
+                        parameters=[{'action_name': 'pick'}]
+                    ),
+                    Node(
+                        package='krr_agent',
+                        executable='action_place',
+                        parameters=[{'action_name': 'place'}]
+                    ),
+                    Node(
+                        package='krr_agent',
+                        executable='action_next_room',
+                        parameters=[{'action_name': 'next_room'}]
+                    ),
+                ])
             ]
         )
     )
 
     return LaunchDescription([
         initial_pose_node,
-        plansys2_bringup,
         mirte_skills_launch,
         typedb_server,
+        delayed_plansys2, # <-- TimerAction substituted here
         on_server_start,
         on_db_ready,
         on_typedb_start,
