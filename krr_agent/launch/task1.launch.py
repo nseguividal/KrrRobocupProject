@@ -16,7 +16,7 @@ from launch.substitutions import PathJoinSubstitution, PythonExpression
 
 def generate_launch_description():
     
-    is_multi_pddl_str = PythonExpression(["'true'"])
+    is_multi_pddl_str = PythonExpression(["'false'"])
 
     krr_project_path = get_package_share_directory('krr_agent')
     plansys_path = get_package_share_directory('plansys2_bringup')

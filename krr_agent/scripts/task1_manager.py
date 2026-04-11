@@ -91,7 +91,7 @@ class TaskManagerNode(TaskManagerBase):
         super().__init__(
             node_name='task_manager_node',
             enable_nav=True,
-            enable_drop_locations=False, # We load them via TypeDB in this task
+            enable_drop_locations=True,
             clear_problem_knowledge=True,
             wait_for_task_status=True,
         )
@@ -106,10 +106,6 @@ class TaskManagerNode(TaskManagerBase):
 
         with self.db_driver.session(self.database_name, SessionType.DATA) as session:
             with session.transaction(TransactionType.READ) as tx:
-                # Load Drops
-                for answer in tx.query.get("match $rm isa room, has room-name $rn; $d isa drop-location, has id $di; (container: $rm, contained-pose: $p) isa spatial-containment; (located-target: $d, location: $p) isa physical-location; get $rn, $di;"):
-                    self.drop_to_room[answer.get("di").as_attribute().get_value()] = answer.get("rn").as_attribute().get_value()
-
                 # Load Scan Locations
                 for answer in tx.query.get("match $rm isa room, has room-name $rn; $scan isa scan-location; $p isa pose, has pos-x $x, has pos-y $y; (container: $rm, contained-pose: $p) isa spatial-containment; (located-target: $scan, location: $p) isa physical-location; get $rn, $x, $y;"):
                     r = answer.get("rn").as_attribute().get_value()
@@ -143,7 +139,27 @@ class TaskManagerNode(TaskManagerBase):
 
             # Scan and get closest drops
             object_poses = self._get_objects_in_room()
-            room_drops = self.get_drop_locations_in_room(room_name)
+
+
+            scanned_drops = self._get_drop_locations_in_room() 
+            room_drops = {}
+            
+            # Knowledge Update: Process Drop Locations
+            for drop in scanned_drops:
+                drop_type = drop.type.data.strip()   # e.g. "dishwasher", "tableware", ...
+                drop_pose = drop.drop_pose
+                drop_id = self._make_drop_id(drop_type)
+                
+                x = drop_pose.position.x
+                y = drop_pose.position.y
+                
+                room_drops[drop_id] = (x, y)
+                self.drop_to_room[drop_id] = room_name
+                
+                # Update TypeDB to anchor the physical reality into symbolic knowledge
+                self.insert_drop_location(drop_id, room_name, x, y)
+                self.get_logger().info(f"Registered drop location {drop_id} in {room_name}")
+
             
             all_scanned_objects, object_to_closest_drop = [], {}
 
