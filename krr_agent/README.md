@@ -57,7 +57,7 @@ typedb server --storage.data ~/<your_ws>/src/krr_agent/typedb_data
 
 ```
 
-And a second terminal to launch the implementation (*always launch this first*).
+And a second terminal to launch the implementation (*always launch this second*).
 ```bash
 # Replace <PATH> with the path to your .sif image and <vX> with the version (e.g., v3)
 singularity shell -B $XAUTHORITY:$XAUTHORITY -p <PATH>/ro47014_humble_<vX>.sif
